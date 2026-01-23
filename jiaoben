@@ -1,0 +1,2 @@
+rm -rf build dist
+python3 -m PyInstaller --onefile --windowed --name CloudflareScan --icon=cfs.icns cfs-mac.py
