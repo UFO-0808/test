@@ -3,40 +3,36 @@ name: Build Universal macOS App
 on:
   push:
     tags:
-      - ‘v*‘
+      - 'v*'
   workflow_dispatch:
 
 jobs:
   build-x86_64:
-    name: 构建 x86_64 (Intel) 版本
+    name: Build x86_64 (Intel) Version
     runs-on: macos-latest
     steps:
-      - name: 检出代码
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 为 x86_64 架构设置 Python 环境
+      - name: Setup Python for x86_64
         uses: actions/setup-python@v5
         with:
-          python-version: ‘3.10‘
+          python-version: '3.10'
 
-      - name: 在 x86_64 环境下安装依赖并打包
+      - name: Install dependencies and build for x86_64
         run: |
-          # 使用 arch 命令模拟 Intel 环境，并创建独立的虚拟环境
-          arch -x86_64 /bin/bash -c “
+          arch -x86_64 /bin/bash -c "
             python -m venv venv_x86
             source venv_x86/bin/activate
             pip install --upgrade pip setuptools wheel
-            # 设置编译标志，确保为 x86_64 编译所有 C 扩展
-            export ARCHFLAGS=‘-arch x86_64‘
-            export CFLAGS=‘$ARCHFLAGS‘
-            export LDFLAGS=‘$ARCHFLAGS‘
-            # 安装依赖
+            export ARCHFLAGS='-arch x86_64'
+            export CFLAGS=\"\$ARCHFLAGS\"
+            export LDFLAGS=\"\$ARCHFLAGS\"
             if [ -f requirements.txt ]; then
               pip install -r requirements.txt
             else
               pip install PyInstaller PySide6 aiohttp
             fi
-            # 开始打包 x86_64 版本
             python -m PyInstaller \
               --onefile \
               --windowed \
@@ -46,11 +42,11 @@ jobs:
               --hidden-import=PySide6.QtCore \
               --hidden-import=PySide6.QtGui \
               --hidden-import=PySide6.QtWidgets \
-              --add-data \“./:.\” \
+              --add-data './:.' \
               ./cfs-mac.py
-          ”
+          "
 
-      - name: 上传 x86_64 版本产物
+      - name: Upload x86_64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-x86_64
@@ -59,34 +55,30 @@ jobs:
           retention-days: 1
 
   build-arm64:
-    name: 构建 arm64 (Apple Silicon) 版本
+    name: Build arm64 (Apple Silicon) Version
     runs-on: macos-latest
     steps:
-      - name: 检出代码
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 为 arm64 架构设置 Python 环境
+      - name: Setup Python for arm64
         uses: actions/setup-python@v5
         with:
-          python-version: ‘3.10‘
+          python-version: '3.10'
 
-      - name: 在原生 arm64 环境下安装依赖并打包
+      - name: Install dependencies and build for arm64
         run: |
-          # 在原生 ARM 环境下创建独立的虚拟环境
           python -m venv venv_arm
           source venv_arm/bin/activate
           pip install --upgrade pip setuptools wheel
-          # 确保为 arm64 编译（通常是默认的）
-          export ARCHFLAGS=‘-arch arm64‘
-          export CFLAGS=‘$ARCHFLAGS‘
-          export LDFLAGS=‘$ARCHFLAGS‘
-          # 安装依赖
+          export ARCHFLAGS='-arch arm64'
+          export CFLAGS=\"\$ARCHFLAGS\"
+          export LDFLAGS=\"\$ARCHFLAGS\"
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
             pip install PyInstaller PySide6 aiohttp
           fi
-          # 开始打包 arm64 版本
           python -m PyInstaller \
             --onefile \
             --windowed \
@@ -96,10 +88,10 @@ jobs:
             --hidden-import=PySide6.QtCore \
             --hidden-import=PySide6.QtGui \
             --hidden-import=PySide6.QtWidgets \
-            --add-data \“./:.\” \
+            --add-data './:.' \
             ./cfs-mac.py
 
-      - name: 上传 arm64 版本产物
+      - name: Upload arm64 artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-arm64
@@ -108,43 +100,40 @@ jobs:
           retention-days: 1
 
   combine-universal:
-    name: 合并为通用二进制
+    name: Combine into Universal Binary
     runs-on: macos-latest
-    needs: [build-x86_64, build-arm64] # 依赖前两个任务完成
+    needs: [build-x86_64, build-arm64]
     steps:
-      - name: 检出代码
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 下载 x86_64 和 arm64 版本
+      - name: Download both architecture builds
         uses: actions/download-artifact@v4
         with:
           path: downloaded_artifacts
 
-      - name: 合并两个架构的二进制文件
+      - name: Merge binaries with lipo
         run: |
-          # 合并
           lipo -create -output CloudflareScan_Universal \
             downloaded_artifacts/app-x86_64/CloudflareScan_x86_64 \
             downloaded_artifacts/app-arm64/CloudflareScan_arm64
           chmod +x CloudflareScan_Universal
-          # 验证
-          echo “✅ 通用二进制文件架构信息:”
+          echo "Universal binary architecture info:"
           lipo -info CloudflareScan_Universal
 
-      - name: 打包最终发布文件
+      - name: Package for release
         run: |
           mkdir -p release
           mv CloudflareScan_Universal release/
           if [ -f cfs.icns ]; then
             cp cfs.icns release/
           fi
-          echo “# Cloudflare Scan (Universal macOS App)” > release/README.txt
-          echo “- 同时支持 Intel (x86_64) 和 Apple Silicon (arm64) 芯片。” >> release/README.txt
-          echo “- 构建于: $(date)” >> release/README.txt
+          echo "# Cloudflare Scan (Universal macOS App)" > release/README.txt
+          echo "- Built: $(date)" >> release/README.txt
           cd release
           zip -r ../CloudflareScan_macOS_Universal.zip .
 
-      - name: 上传最终通用版本
+      - name: Upload final universal artifact
         uses: actions/upload-artifact@v4
         with:
           name: CloudflareScan-Universal
