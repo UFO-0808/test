@@ -3,94 +3,94 @@ name: Build Universal macOS App
 on:
   push:
     tags:
-      - 'v*'           # 只有推送类似 v1.0 的标签时才触发，节省资源
-  workflow_dispatch:    # 允许在 GitHub 网页手动触发构建
+      - ‘v*’
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-latest  # 使用最新的 macOS Runner（内含 M1 环境）
+    runs-on: macos-latest
     strategy:
       matrix:
-        python-version: ['3.9']  # 使用稳定的 Python 3.9
+        python-version: [‘3.9’]
 
     steps:
     - name: 检出代码
-      uses: actions/checkout@v4  # 升级到 v4
+      uses: actions/checkout@v4
 
     - name: 设置 Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v5  # 升级到 v5
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
-    - name: 安装依赖
+    - name: 安装依赖 (x86_64 环境)
       run: |
-        python -m pip install --upgrade pip
-        # 如果存在 requirements.txt，优先使用它
-        if [ -f requirements.txt ]; then
-          pip install -r requirements.txt
-        else
-          # 否则安装核心依赖
-          pip install PyInstaller PySide6 aiohttp
-        fi
+        # 关键点1: 使用arch命令进入x86_64模拟环境
+        # 关键点2: 设置环境变量，强制从源码编译C扩展
+        arch -x86_64 /bin/bash -c “
+          python -m pip install --upgrade pip setuptools wheel
+          # 设置编译标志，确保生成x86_64的二进制
+          export ARCHFLAGS=‘-arch x86_64’
+          export PIP_BUILD=‘1’
+          # 安装依赖，这会触发从源码编译（如yarl）
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install PyInstaller PySide6 aiohttp
+          fi
+        ”
 
     - name: 为双架构分别打包
       run: |
-        # 1. 打包 x86_64 版本（在 M1 Runner 上通过 Rosetta 2 模拟运行）
+        echo “=== 开始打包 x86_64 版本 ==="
+        # 关键点3: 在x86_64环境内执行PyInstaller
         arch -x86_64 python -m PyInstaller \
           --onefile \
           --windowed \
-          --name "CloudflareScan_x86_64" \
+          --name “CloudflareScan_x86_64” \
           --hidden-import=asyncio \
           --hidden-import=aiohttp \
           --hidden-import=PySide6.QtCore \
           --hidden-import=PySide6.QtGui \
           --hidden-import=PySide6.QtWidgets \
-          --add-data "./:." \
+          --add-data “./:.” \
           ./cfs-mac.py
 
-        # 2. 打包原生 arm64 版本
+        echo “=== 开始打包原生 arm64 版本 ==="
+        # arm64版本无需特殊处理
         python -m PyInstaller \
           --onefile \
           --windowed \
-          --name "CloudflareScan_arm64" \
+          --name “CloudflareScan_arm64” \
           --hidden-import=asyncio \
           --hidden-import=aiohttp \
           --hidden-import=PySide6.QtCore \
           --hidden-import=PySide6.QtGui \
           --hidden-import=PySide6.QtWidgets \
-          --add-data "./:." \
+          --add-data “./:.” \
           ./cfs-mac.py
 
     - name: 合并为通用二进制
       run: |
-        # 使用 lipo 工具合并两个架构的可执行文件
-        lipo -create -output "CloudflareScan_Universal" \
-          "./dist/CloudflareScan_x86_64" \
-          "./dist/CloudflareScan_arm64"
-        chmod +x "CloudflareScan_Universal"
-        # 输出验证信息
-        echo "✅ 通用二进制文件创建成功，架构信息如下："
-        lipo -info "CloudflareScan_Universal"
+        lipo -create -output “CloudflareScan_Universal” \
+          “./dist/CloudflareScan_x86_64” \
+          “./dist/CloudflareScan_arm64”
+        chmod +x “CloudflareScan_Universal”
+        echo “✅ 通用二进制文件创建成功:”
+        lipo -info “CloudflareScan_Universal”
 
-    - name: 准备发布文件
+    - name: 准备并上传构建产物
       run: |
         mkdir -p release
-        mv "CloudflareScan_Universal" release/
-        # 可选：复制图标文件
+        mv “CloudflareScan_Universal” release/
         if [ -f cfs.icns ]; then
           cp cfs.icns release/
         fi
-        echo "# Cloudflare Scan (Universal macOS App)" > release/README.txt
-        echo "构建时间: $(date)" >> release/README.txt
-
-    - name: 创建 Release 压缩包
-      run: |
         cd release
-        zip -r "../CloudflareScan_macOS_Universal.zip" .
+        zip -r “../CloudflareScan_macOS_Universal.zip” .
 
-    - name: 上传构建产物 (Artifact)
-      uses: actions/upload-artifact@v4  # 关键修复：升级到 v4
+    - name: 上传 Artifact
+      uses: actions/upload-artifact@v4
       with:
         name: CloudflareScan-Universal
         path: CloudflareScan_macOS_Universal.zip
-        retention-days: 7  # 产物保留天数（免费额度内）
+        retention-days: 7
