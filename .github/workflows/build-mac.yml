@@ -1,4 +1,4 @@
-name: Build macOS Universal Application
+name: Build macOS Application
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 jobs:
   build-arm64:
     name: Build ARM64 (Apple Silicon)
-    runs-on: macos-latest  # 或 macos-14
+    runs-on: macos-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -35,13 +35,11 @@ jobs:
           --name $BUILD_NAME \
           --icon=cfs.icns \
           --add-data "cfs.icns:." \
-          --target-architecture arm64 \
           cfs-mac.py
         
         echo "=== 验证ARM64构建 ==="
         if [ -d "dist/$BUILD_NAME.app" ]; then
           echo "✓ ARM64应用包创建成功"
-          file "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME"
         fi
     
     - name: Create ARM64 DMG
@@ -74,35 +72,47 @@ jobs:
 
   build-x86_64:
     name: Build x86_64 (Intel)
-    # 关键：指定Intel macOS runner（如果可用）
-    # 如果GitHub不提供Intel macOS runner，考虑使用cross-compilation
     runs-on: macos-latest
-    # 或者使用自托管runner：runs-on: self-hosted-mac-intel
     
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.10"
-    
-    - name: Install dependencies
+    - name: Install Homebrew for x86_64
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
-        pip install pyinstaller
+        # 安装x86_64版本的Homebrew
+        arch -x86_64 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+        echo 'eval "$(/usr/local/bin/brew shellenv)"' >> ~/.zprofile
+        eval "$(/usr/local/bin/brew shellenv)"
     
-    - name: Build x86_64 application (使用Rosetta 2)
+    - name: Install Python 3.10 for x86_64
+      run: |
+        # 使用x86_64 Homebrew安装x86_64 Python
+        arch -x86_64 /usr/local/bin/brew install python@3.10
+        echo "Python安装完成"
+        /usr/local/opt/python@3.10/bin/python3 --version
+    
+    - name: Install x86_64 dependencies
+      run: |
+        # 使用x86_64 Python安装依赖
+        /usr/local/opt/python@3.10/bin/python3 -m pip install --upgrade pip
+        /usr/local/opt/python@3.10/bin/pip3 install -r requirements.txt
+        /usr/local/opt/python@3.10/bin/pip3 install pyinstaller
+        
+        # 验证依赖的架构
+        echo "=== 验证依赖架构 ==="
+        find /usr/local/opt/python@3.10/lib/python3.10/site-packages -name "*.so" -exec file {} \; | head -5
+    
+    - name: Build x86_64 application
       run: |
         BUILD_NAME="CloudflareScan_x86_64"
         
         echo "Building Intel (x86_64) version..."
         echo "当前架构: $(uname -m)"
+        echo "Python路径: $(which python3)"
         
-        # 使用arch命令强制在Rosetta 2下运行
-        arch -x86_64 python -m PyInstaller --onefile --windowed \
+        # 使用x86_64 Python和PyInstaller构建
+        /usr/local/opt/python@3.10/bin/python3 -m PyInstaller --onefile --windowed \
           --name $BUILD_NAME \
           --icon=cfs.icns \
           --add-data "cfs.icns:." \
@@ -111,7 +121,16 @@ jobs:
         echo "=== 验证x86_64构建 ==="
         if [ -d "dist/$BUILD_NAME.app" ]; then
           echo "✓ x86_64应用包创建成功"
-          file "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME"
+          # 检查二进制文件的架构
+          if [ -f "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME" ]; then
+            echo "文件架构:"
+            file "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME"
+            echo "支持的架构:"
+            lipo -archs "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME" 2>/dev/null || true
+          fi
+        else
+          echo "✗ 应用包创建失败"
+          ls -la dist/
         fi
     
     - name: Create x86_64 DMG
@@ -141,22 +160,3 @@ jobs:
           dist/CloudflareScan_x86_64.app
           CloudflareScan_x86_64.dmg
         retention-days: 7
-
-  # 可选：合并为Universal Binary
-  create-universal:
-    name: Create Universal Binary
-    needs: [build-arm64, build-x86_64]
-    runs-on: macos-latest
-    if: always()
-    
-    steps:
-    - name: Download both architectures
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
-    
-    - name: Create Universal App (示例)
-      run: |
-        echo "如果需要合并为Universal App，可以在此步骤实现"
-        echo "下载的artifacts:"
-        find artifacts -type f -name "*.app" -o -name "*.dmg"
