@@ -1056,6 +1056,7 @@ class CloudflareScanUI(QWidget):
                 border-radius: 6px;
                 padding-left: 8px;
                 font-family: "{SYSTEM_FONT}";
+                color: #111827;
             }}
             QLineEdit:focus {{
                 border-color: #F97316;
@@ -1100,6 +1101,7 @@ class CloudflareScanUI(QWidget):
                 border-radius: 6px;
                 padding: 0px 5px;
                 font-family: "{SYSTEM_FONT}";
+                color: #111827;
             }}
             QComboBox:focus {{
                 border-color: #F97316;
@@ -1713,3 +1715,4 @@ if __name__ == "__main__":
     
     win.show()
     sys.exit(app.exec())
+
