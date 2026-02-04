@@ -25,24 +25,21 @@ jobs:
             python -m venv venv_x86
             source venv_x86/bin/activate
             pip install --upgrade pip setuptools wheel
-            export ARCHFLAGS='-arch x86_64'
-            export CFLAGS=\"\$ARCHFLAGS\"
-            export LDFLAGS=\"\$ARCHFLAGS\"
             if [ -f requirements.txt ]; then
               pip install -r requirements.txt
             else
               pip install PyInstaller PySide6 aiohttp
             fi
             python -m PyInstaller \
-              --onefile \
               --windowed \
               --name CloudflareScan_x86_64 \
+              --icon=cfs.icns \
+              --add-data 'cfs.icns:.' \
               --hidden-import=asyncio \
               --hidden-import=aiohttp \
               --hidden-import=PySide6.QtCore \
               --hidden-import=PySide6.QtGui \
               --hidden-import=PySide6.QtWidgets \
-              --add-data './:.' \
               ./cfs-mac.py
           "
 
@@ -51,7 +48,7 @@ jobs:
         with:
           name: app-x86_64
           path: |
-            dist/CloudflareScan_x86_64
+            dist/CloudflareScan_x86_64.app
           retention-days: 1
 
   build-arm64:
@@ -71,24 +68,21 @@ jobs:
           python -m venv venv_arm
           source venv_arm/bin/activate
           pip install --upgrade pip setuptools wheel
-          export ARCHFLAGS='-arch arm64'
-          export CFLAGS=\"\$ARCHFLAGS\"
-          export LDFLAGS=\"\$ARCHFLAGS\"
           if [ -f requirements.txt ]; then
             pip install -r requirements.txt
           else
             pip install PyInstaller PySide6 aiohttp
           fi
           python -m PyInstaller \
-            --onefile \
             --windowed \
             --name CloudflareScan_arm64 \
+            --icon=cfs.icns \
+            --add-data 'cfs.icns:.' \
             --hidden-import=asyncio \
             --hidden-import=aiohttp \
             --hidden-import=PySide6.QtCore \
             --hidden-import=PySide6.QtGui \
             --hidden-import=PySide6.QtWidgets \
-            --add-data './:.' \
             ./cfs-mac.py
 
       - name: Upload arm64 artifact
@@ -96,11 +90,11 @@ jobs:
         with:
           name: app-arm64
           path: |
-            dist/CloudflareScan_arm64
+            dist/CloudflareScan_arm64.app
           retention-days: 1
 
   combine-universal:
-    name: Combine into Universal Binary
+    name: Combine into Universal App
     runs-on: macos-latest
     needs: [build-x86_64, build-arm64]
     steps:
@@ -112,30 +106,63 @@ jobs:
         with:
           path: downloaded_artifacts
 
-      - name: Merge binaries with lipo
+      - name: Create Universal App bundle
         run: |
-          lipo -create -output CloudflareScan_Universal \
-            downloaded_artifacts/app-x86_64/CloudflareScan_x86_64 \
-            downloaded_artifacts/app-arm64/CloudflareScan_arm64
-          chmod +x CloudflareScan_Universal
+          # 提取两个架构的可执行文件
+          mkdir -p temp_universal
+          cp -r downloaded_artifacts/app-x86_64/CloudflareScan_x86_64.app temp_universal/CloudflareScan_Universal.app
+          
+          # 合并可执行文件
+          lipo -create -output temp_universal/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan_x86_64 \
+            downloaded_artifacts/app-x86_64/CloudflareScan_x86_64.app/Contents/MacOS/CloudflareScan_x86_64 \
+            downloaded_artifacts/app-arm64/CloudflareScan_arm64.app/Contents/MacOS/CloudflareScan_arm64
+          
+          # 重命名可执行文件
+          mv temp_universal/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan_x86_64 \
+             temp_universal/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan
+          
+          # 更新 Info.plist 中的可执行文件名
+          plutil -replace CFBundleExecutable -string "CloudflareScan" temp_universal/CloudflareScan_Universal.app/Contents/Info.plist
+          
+          # 检查架构
           echo "Universal binary architecture info:"
-          lipo -info CloudflareScan_Universal
-
-      - name: Package for release
-        run: |
+          lipo -info temp_universal/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan
+          
+          # 移动到 release 目录
           mkdir -p release
-          mv CloudflareScan_Universal release/
-          if [ -f cfs.icns ]; then
-            cp cfs.icns release/
-          fi
-          echo "# Cloudflare Scan (Universal macOS App)" > release/README.txt
-          echo "- Built: $(date)" >> release/README.txt
+          mv temp_universal/CloudflareScan_Universal.app release/
+
+      - name: Create DMG package
+        run: |
+          brew install create-dmg
+          
           cd release
-          zip -r ../CloudflareScan_macOS_Universal.zip .
+          create-dmg \
+            --volname "CloudflareScan" \
+            --volicon "CloudflareScan_Universal.app/Contents/Resources/cfs.icns" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "CloudflareScan_Universal.app" 200 190 \
+            --hide-extension "CloudflareScan_Universal.app" \
+            --app-drop-link 600 185 \
+            "CloudflareScan_macOS_Universal.dmg" \
+            "."
 
       - name: Upload final universal artifact
         uses: actions/upload-artifact@v4
         with:
           name: CloudflareScan-Universal
-          path: CloudflareScan_macOS_Universal.zip
+          path: |
+            release/CloudflareScan_macOS_Universal.dmg
+            release/CloudflareScan_Universal.app
           retention-days: 7
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            release/CloudflareScan_macOS_Universal.dmg
+          draft: false
+          prerelease: false
