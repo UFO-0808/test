@@ -1,4 +1,4 @@
-name: Build Universal macOS App
+name: Build macOS Apps (Separate Architectures)
 
 on:
   push:
@@ -7,36 +7,29 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-universal:
-    name: Build Universal macOS App
+  build-x86_64:
+    name: Build x86_64 (Intel) Version
     runs-on: macos-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Python for Universal Build
+      - name: Setup Python for x86_64
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies for both architectures
+      - name: Install dependencies and build for x86_64
         run: |
-          # 安装通用依赖
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          else
-            pip install PyInstaller PySide6 aiohttp
-          fi
-
-      - name: Build x86_64 version
-        run: |
-          # 使用x86_64架构
-          arch -x86_64 bash -c "
+          arch -x86_64 /bin/bash -c "
             python -m venv venv_x86
             source venv_x86/bin/activate
             pip install --upgrade pip setuptools wheel
-            pip install PyInstaller PySide6 aiohttp
+            if [ -f requirements.txt ]; then
+              pip install -r requirements.txt
+            else
+              pip install PyInstaller PySide6 aiohttp
+            fi
             python -m PyInstaller \
               --windowed \
               --name CloudflareScan_x86_64 \
@@ -49,22 +42,54 @@ jobs:
               --hidden-import=PySide6.QtWidgets \
               cfs-mac.py
           "
-          
-          # 重命名可执行文件以区分架构
-          mv dist/CloudflareScan_x86_64.app/Contents/MacOS/CloudflareScan_x86_64 \
-             dist/CloudflareScan_x86_64.app/Contents/MacOS/CloudflareScan_x86_64_bin
-          
-          # 更新Info.plist
-          plutil -replace CFBundleExecutable -string "CloudflareScan_x86_64_bin" \
-            dist/CloudflareScan_x86_64.app/Contents/Info.plist
 
-      - name: Build arm64 version
+      - name: Create DMG for x86_64
         run: |
-          # 使用arm64架构
+          brew install create-dmg
+          
+          create-dmg \
+            --volname "CloudflareScan (Intel)" \
+            --volicon "cfs.icns" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --icon "CloudflareScan_x86_64.app" 200 190 \
+            --hide-extension "CloudflareScan_x86_64.app" \
+            --app-drop-link 600 185 \
+            "CloudflareScan_Intel.dmg" \
+            "dist/"
+
+      - name: Upload x86_64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: CloudflareScan-x86_64
+          path: |
+            dist/CloudflareScan_x86_64.app
+            CloudflareScan_Intel.dmg
+          retention-days: 7
+
+  build-arm64:
+    name: Build arm64 (Apple Silicon) Version
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python for arm64
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies and build for arm64
+        run: |
           python -m venv venv_arm
           source venv_arm/bin/activate
           pip install --upgrade pip setuptools wheel
-          pip install PyInstaller PySide6 aiohttp
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          else
+            pip install PyInstaller PySide6 aiohttp
+          fi
           python -m PyInstaller \
             --windowed \
             --name CloudflareScan_arm64 \
@@ -76,90 +101,48 @@ jobs:
             --hidden-import=PySide6.QtGui \
             --hidden-import=PySide6.QtWidgets \
             cfs-mac.py
-          
-          # 重命名可执行文件以区分架构
-          mv dist/CloudflareScan_arm64.app/Contents/MacOS/CloudflareScan_arm64 \
-             dist/CloudflareScan_arm64.app/Contents/MacOS/CloudflareScan_arm64_bin
-          
-          # 更新Info.plist
-          plutil -replace CFBundleExecutable -string "CloudflareScan_arm64_bin" \
-            dist/CloudflareScan_arm64.app/Contents/Info.plist
 
-      - name: Create Universal App
+      - name: Create DMG for arm64
         run: |
-          echo "创建通用应用..."
-          
-          # 复制x86_64应用作为基础
-          cp -r dist/CloudflareScan_x86_64.app dist/CloudflareScan_Universal.app
-          
-          # 合并可执行文件
-          lipo -create -output dist/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan \
-            dist/CloudflareScan_x86_64.app/Contents/MacOS/CloudflareScan_x86_64_bin \
-            dist/CloudflareScan_arm64.app/Contents/MacOS/CloudflareScan_arm64_bin
-          
-          # 设置可执行权限
-          chmod +x dist/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan
-          
-          # 更新Info.plist
-          plutil -replace CFBundleExecutable -string "CloudflareScan" \
-            dist/CloudflareScan_Universal.app/Contents/Info.plist
-          
-          # 检查架构
-          echo "通用二进制架构信息:"
-          lipo -info dist/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan
-          
-          # 清理临时文件
-          rm -rf dist/CloudflareScan_x86_64.app
-          rm -rf dist/CloudflareScan_arm64.app
-
-      - name: Create DMG package
-        run: |
-          # 安装create-dmg
           brew install create-dmg
           
-          # 准备DMG目录
-          mkdir -p dmg_temp
-          cp -r dist/CloudflareScan_Universal.app dmg_temp/
-          
-          # 创建DMG
           create-dmg \
-            --volname "CloudflareScan" \
+            --volname "CloudflareScan (Apple Silicon)" \
             --volicon "cfs.icns" \
             --window-pos 200 120 \
             --window-size 800 400 \
             --icon-size 100 \
-            --icon "CloudflareScan_Universal.app" 200 190 \
-            --hide-extension "CloudflareScan_Universal.app" \
+            --icon "CloudflareScan_arm64.app" 200 190 \
+            --hide-extension "CloudflareScan_arm64.app" \
             --app-drop-link 600 185 \
-            "CloudflareScan_macOS_Universal.dmg" \
-            "dmg_temp/"
-          
-          # 移动DMG到dist目录
-          mv CloudflareScan_macOS_Universal.dmg dist/
+            "CloudflareScan_AppleSilicon.dmg" \
+            "dist/"
 
-      - name: Check file sizes
-        run: |
-          echo "应用文件大小:"
-          du -h dist/CloudflareScan_Universal.app
-          echo ""
-          echo "DMG文件大小:"
-          du -h dist/CloudflareScan_macOS_Universal.dmg
-
-      - name: Upload artifacts
+      - name: Upload arm64 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CloudflareScan-Universal
+          name: CloudflareScan-arm64
           path: |
-            dist/CloudflareScan_Universal.app
-            dist/CloudflareScan_macOS_Universal.dmg
+            dist/CloudflareScan_arm64.app
+            CloudflareScan_AppleSilicon.dmg
           retention-days: 7
 
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-x86_64, build-arm64]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download both artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            dist/CloudflareScan_macOS_Universal.dmg
-            dist/CloudflareScan_Universal.app/Contents/MacOS/CloudflareScan
+            release-artifacts/CloudflareScan-x86_64/CloudflareScan_Intel.dmg
+            release-artifacts/CloudflareScan-arm64/CloudflareScan_AppleSilicon.dmg
           draft: false
           prerelease: false
