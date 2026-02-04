@@ -1,4 +1,4 @@
-name: Build macOS Application
+name: Build macOS Universal Application
 
 on:
   push:
@@ -7,19 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: macos-latest
-    strategy:
-      matrix:
-        python-version: ["3.10"]
-        include:
-          - target: x86_64
-            suffix: x86_64
-            arch_flag: "--target-architecture x86_64"
-          - target: arm64
-            suffix: arm64
-            arch_flag: "--target-architecture arm64"
-    
+  build-arm64:
+    name: Build ARM64 (Apple Silicon)
+    runs-on: macos-latest  # 或 macos-14
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -27,49 +17,39 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ matrix.python-version }}
+        python-version: "3.10"
     
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-        pip install pyinstaller==5.13.0
+        pip install pyinstaller
     
-    - name: Build application
+    - name: Build ARM64 application
       run: |
-        BUILD_NAME="CloudflareScan_${{ matrix.suffix }}"
+        BUILD_NAME="CloudflareScan_arm64"
         
-        echo "构建架构: ${{ matrix.target }}"
-        echo "构建参数: ${{ matrix.arch_flag }}"
+        echo "Building Apple Silicon (ARM64) version..."
         
-        # 使用PyInstaller构建
         python -m PyInstaller --onefile --windowed \
           --name $BUILD_NAME \
           --icon=cfs.icns \
           --add-data "cfs.icns:." \
-          ${{ matrix.arch_flag }} \
+          --target-architecture arm64 \
           cfs-mac.py
         
-        echo "=== 验证构建文件 ==="
+        echo "=== 验证ARM64构建 ==="
         if [ -d "dist/$BUILD_NAME.app" ]; then
-          echo "✓ 应用包创建成功"
-          # 检查二进制文件的架构
-          if [ -f "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME" ]; then
-            file "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME"
-            lipo -archs "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME" 2>/dev/null || echo "无法获取架构信息"
-          fi
-        else
-          echo "✗ 应用包创建失败"
-          ls -la dist/
+          echo "✓ ARM64应用包创建成功"
+          file "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME"
         fi
     
-    - name: Create DMG
+    - name: Create ARM64 DMG
       if: success()
       run: |
-        BUILD_NAME="CloudflareScan_${{ matrix.suffix }}"
-        DMG_NAME="CloudflareScan_${{ matrix.suffix }}.dmg"
-        
         brew install create-dmg
+        BUILD_NAME="CloudflareScan_arm64"
+        DMG_NAME="CloudflareScan_arm64.dmg"
         
         create-dmg \
           --volname "CloudflareScan" \
@@ -82,15 +62,101 @@ jobs:
           --app-drop-link 600 185 \
           "$DMG_NAME" \
           "dist/"
-        
-        echo "DMG文件大小:"
-        du -h "$DMG_NAME"
     
-    - name: Upload artifacts
+    - name: Upload ARM64 artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: CloudflareScan-${{ matrix.suffix }}
+        name: CloudflareScan-arm64
         path: |
-          dist/CloudflareScan_${{ matrix.suffix }}.app
-          CloudflareScan_${{ matrix.suffix }}.dmg
+          dist/CloudflareScan_arm64.app
+          CloudflareScan_arm64.dmg
         retention-days: 7
+
+  build-x86_64:
+    name: Build x86_64 (Intel)
+    # 关键：指定Intel macOS runner（如果可用）
+    # 如果GitHub不提供Intel macOS runner，考虑使用cross-compilation
+    runs-on: macos-latest
+    # 或者使用自托管runner：runs-on: self-hosted-mac-intel
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+    
+    - name: Build x86_64 application (使用Rosetta 2)
+      run: |
+        BUILD_NAME="CloudflareScan_x86_64"
+        
+        echo "Building Intel (x86_64) version..."
+        echo "当前架构: $(uname -m)"
+        
+        # 使用arch命令强制在Rosetta 2下运行
+        arch -x86_64 python -m PyInstaller --onefile --windowed \
+          --name $BUILD_NAME \
+          --icon=cfs.icns \
+          --add-data "cfs.icns:." \
+          cfs-mac.py
+        
+        echo "=== 验证x86_64构建 ==="
+        if [ -d "dist/$BUILD_NAME.app" ]; then
+          echo "✓ x86_64应用包创建成功"
+          file "dist/$BUILD_NAME.app/Contents/MacOS/$BUILD_NAME"
+        fi
+    
+    - name: Create x86_64 DMG
+      if: success()
+      run: |
+        brew install create-dmg
+        BUILD_NAME="CloudflareScan_x86_64"
+        DMG_NAME="CloudflareScan_x86_64.dmg"
+        
+        create-dmg \
+          --volname "CloudflareScan" \
+          --volicon "cfs.icns" \
+          --window-pos 200 120 \
+          --window-size 800 400 \
+          --icon-size 100 \
+          --icon "$BUILD_NAME.app" 200 190 \
+          --hide-extension "$BUILD_NAME.app" \
+          --app-drop-link 600 185 \
+          "$DMG_NAME" \
+          "dist/"
+    
+    - name: Upload x86_64 artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: CloudflareScan-x86_64
+        path: |
+          dist/CloudflareScan_x86_64.app
+          CloudflareScan_x86_64.dmg
+        retention-days: 7
+
+  # 可选：合并为Universal Binary
+  create-universal:
+    name: Create Universal Binary
+    needs: [build-arm64, build-x86_64]
+    runs-on: macos-latest
+    if: always()
+    
+    steps:
+    - name: Download both architectures
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+    
+    - name: Create Universal App (示例)
+      run: |
+        echo "如果需要合并为Universal App，可以在此步骤实现"
+        echo "下载的artifacts:"
+        find artifacts -type f -name "*.app" -o -name "*.dmg"
