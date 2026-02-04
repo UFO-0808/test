@@ -1,2 +1,11 @@
-PySide6==6.6.0
-aiohttp==3.9.1
+# Python GUI 框架
+PySide6>=6.5.0
+
+# 异步 HTTP 客户端，用于扫描和测速
+aiohttp>=3.8.0
+
+# 打包工具（用于构建可执行文件）
+pyinstaller>=5.10.0
+
+# 可选：图标处理库（如果你使用了我之前提供的 `make_icon.py` 脚本）
+# Pillow>=9.5.0
